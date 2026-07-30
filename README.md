@@ -263,60 +263,69 @@ thorough). Exits `3` if anything is damaged, so a timer can page you.
 Draupnir is built to be scheduled. It locks its output directory, exits with
 meaningful codes, and writes a JSON report you can alert on.
 
-**`/etc/systemd/system/draupnir.service`**
+Ready-to-adapt files for every init system live in
+[`contrib/`](contrib/) — pick the one that matches your setup:
 
-```ini
-[Unit]
-Description=Mirror git.example.org
-After=network-online.target
-Wants=network-online.target
+| Init system | Scheduling | Files |
+|---|---|---|
+| systemd | built-in timer | [`contrib/systemd/`](contrib/systemd/) |
+| OpenRC (Gentoo, Alpine, Artix) | cron — OpenRC has no timers | [`contrib/openrc/`](contrib/openrc/) + [`contrib/cron/`](contrib/cron/) |
+| runit, s6, SysV, BSD | cron | [`contrib/cron/`](contrib/cron/) |
+| macOS | launchd | [`contrib/launchd/`](contrib/launchd/) |
+| no root at all | `crontab -e` | [`contrib/cron/`](contrib/cron/) |
 
-[Service]
-Type=oneshot
-User=mirror
-Environment=DRAUPNIR_TOKEN_FILE=/etc/draupnir/token
-ExecStart=/usr/local/bin/draupnir sync https://git.example.org \
-    --output /srv/mirror \
-    --token-file /etc/draupnir/token \
-    --mode mirror \
-    --jobs 8 \
-    --json /var/log/draupnir/last-run.json \
-    --quiet
-
-# Hardening
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/srv/mirror /var/log/draupnir
-```
-
-**`/etc/systemd/system/draupnir.timer`**
-
-```ini
-[Unit]
-Description=Mirror git.example.org nightly
-
-[Timer]
-OnCalendar=daily
-RandomizedDelaySec=1h
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
+**systemd** — templated, one instance per forge:
 
 ```bash
-systemctl enable --now draupnir.timer
+cp contrib/systemd/draupnir@.service contrib/systemd/draupnir@.timer /etc/systemd/system/
+mkdir -p /etc/draupnir
+cat > /etc/draupnir/git.example.org.conf <<'EOF'
+FORGE_URL=https://git.example.org
+OUTPUT=/srv/mirror/git.example.org
+DRAUPNIR_ARGS=--mode mirror --jobs 8 --quiet
+EOF
+systemctl enable --now draupnir@git.example.org.timer
 ```
 
-A weekly integrity check pairs well with it:
+**OpenRC** — the init script runs the job, cron schedules it:
+
+```bash
+cp contrib/openrc/draupnir /etc/init.d/draupnir
+cp contrib/openrc/draupnir.confd /etc/conf.d/draupnir
+chmod +x /etc/init.d/draupnir
+$EDITOR /etc/conf.d/draupnir
+
+rc-service draupnir start     # sync now
+rc-service draupnir verify    # git fsck the whole mirror
+```
+
+```cron
+30 3 * * *  root  /sbin/rc-service draupnir start
+```
+
+**Anything else** — the portable POSIX `sh` wrapper handles log rotation, load
+splaying, a weekly integrity check, and exit-code mapping so cron only mails
+you when something is actually wrong:
+
+```bash
+cp contrib/cron/draupnir-mirror /usr/local/sbin/
+chmod +x /usr/local/sbin/draupnir-mirror
+echo 'FORGE_URL=https://git.example.org' > /etc/default/draupnir
+echo 'OUTPUT=/srv/mirror' >> /etc/default/draupnir
+```
+
+```cron
+30 3 * * *  mirror  /usr/local/sbin/draupnir-mirror
+```
+
+Overlapping runs are safe: draupnir locks the output directory and a second run
+exits `2` instead of corrupting anything.
+
+A weekly integrity check pairs well with any of these:
 
 ```bash
 draupnir verify -o /srv/mirror --json /var/log/draupnir/verify.json || notify-my-pager
 ```
-
----
 
 ## Library API
 

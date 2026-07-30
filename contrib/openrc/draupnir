@@ -1,0 +1,123 @@
+#!/sbin/openrc-run
+# OpenRC service for draupnir (Gentoo, Alpine, Artix, Devuan, ...).
+#
+# This is a BATCH JOB, not a daemon: one invocation runs one sync to completion
+# and exits. OpenRC has no timer mechanism, so scheduling comes from cron --
+# see ../cron/draupnir-mirror, or simply:
+#
+#     # /etc/cron.d/draupnir
+#     30 3 * * *  root  /sbin/rc-service draupnir start
+#
+# Install:
+#     cp contrib/openrc/draupnir       /etc/init.d/draupnir
+#     cp contrib/openrc/draupnir.confd /etc/conf.d/draupnir
+#     chmod +x /etc/init.d/draupnir
+#
+# Multiple forges: symlink per instance, each reading its own conf.d file.
+#     ln -s draupnir /etc/init.d/draupnir.example
+#     $EDITOR /etc/conf.d/draupnir.example
+#
+# Usage:
+#     rc-service draupnir start     # sync now
+#     rc-service draupnir verify    # git fsck the whole mirror
+#     rc-service draupnir status    # inspect the local tree
+
+description="Mirror a Gitea/Forgejo forge with draupnir"
+description_verify="Check every mirrored repository with git fsck"
+description_report="Show what is currently on disk"
+
+extra_commands="verify report"
+
+: "${draupnir_bin:=/usr/local/bin/draupnir}"
+: "${draupnir_user:=root}"
+: "${draupnir_output:=/srv/mirror}"
+: "${draupnir_args:=}"
+: "${draupnir_log:=/var/log/draupnir}"
+: "${draupnir_nice:=10}"
+
+depend() {
+	need net
+	use dns logger
+	after firewall
+}
+
+# Run as draupnir_user without assuming su(1) flavour or a login shell.
+_run() {
+	local rc
+
+	if [ ! -x "${draupnir_bin}" ]; then
+		eerror "${draupnir_bin} not found or not executable"
+		eerror "set draupnir_bin= in /etc/conf.d/${RC_SVCNAME}"
+		return 1
+	fi
+
+	if [ "$(id -un)" = "${draupnir_user}" ]; then
+		nice -n "${draupnir_nice}" "${draupnir_bin}" "$@"
+	else
+		# --wait keeps this a foreground batch job instead of daemonising.
+		start-stop-daemon --start --wait 0 \
+			--user "${draupnir_user}" \
+			--nicelevel "${draupnir_nice}" \
+			--exec "${draupnir_bin}" -- "$@"
+	fi
+	rc=$?
+
+	# Never leave the service marked "started": it is not a running daemon.
+	mark_service_stopped "${RC_SVCNAME}" 2>/dev/null
+	return ${rc}
+}
+
+_prepare() {
+	checkpath -d -m 0755 -o "${draupnir_user}" "${draupnir_output}" || return 1
+	checkpath -d -m 0755 -o "${draupnir_user}" "${draupnir_log}" || return 1
+}
+
+start() {
+	local rc
+
+	if [ -z "${draupnir_url}" ]; then
+		eerror "draupnir_url is not set in /etc/conf.d/${RC_SVCNAME}"
+		return 1
+	fi
+
+	_prepare || return 1
+
+	ebegin "Mirroring ${draupnir_url}"
+	# shellcheck disable=SC2086  # draupnir_args is intentionally word-split
+	_run sync "${draupnir_url}" \
+		--output "${draupnir_output}" \
+		--json "${draupnir_log}/${RC_SVCNAME}.json" \
+		${draupnir_args}
+	rc=$?
+
+	case ${rc} in
+		0)   eend 0 ;;
+		1)   ewarn "some repositories failed -- see ${draupnir_log}/${RC_SVCNAME}.json"
+		     eend 0 ;;
+		130) ewarn "interrupted"; eend 0 ;;
+		*)   eend ${rc} "draupnir exited ${rc}" ;;
+	esac
+	return 0
+}
+
+stop() {
+	# Nothing to stop; a run either finished or was killed with the service.
+	return 0
+}
+
+verify() {
+	local rc
+
+	ebegin "Verifying ${draupnir_output}"
+	_run verify --output "${draupnir_output}" --json "${draupnir_log}/verify.json"
+	rc=$?
+	if [ ${rc} -eq 3 ]; then
+		eend 1 "mirror is damaged -- see ${draupnir_log}/verify.json"
+		return 1
+	fi
+	eend ${rc}
+}
+
+report() {
+	_run status --output "${draupnir_output}"
+}

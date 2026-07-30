@@ -1,0 +1,27 @@
+# /etc/conf.d/draupnir -- configuration for the OpenRC service.
+
+# Forge to mirror. Required.
+draupnir_url="https://git.example.org"
+
+# Where repositories land.
+draupnir_output="/srv/mirror"
+
+# Account owning the mirror. Create it first, e.g.
+#   useradd --system --home-dir /srv/mirror --shell /sbin/nologin mirror
+draupnir_user="mirror"
+
+# Path to the executable (pip install puts it in /usr/local/bin by default).
+draupnir_bin="/usr/local/bin/draupnir"
+
+# JSON run reports.
+draupnir_log="/var/log/draupnir"
+
+# Extra flags. Word-split, so quote nothing here.
+draupnir_args="--mode mirror --jobs 8 --include-wiki --quiet"
+
+# Lower this to give the mirror more CPU priority.
+draupnir_nice="10"
+
+# API token for private repositories. Prefer a root-owned 0600 file and
+# --token-file over putting the secret in this world-readable config:
+#   draupnir_args="--token-file /etc/draupnir/token ${draupnir_args}"

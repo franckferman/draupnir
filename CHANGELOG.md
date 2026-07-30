@@ -57,6 +57,11 @@ First public release.
   event listener interface, so downstream tools can embed the engine instead of
   shelling out to the CLI.
 
+**Integration**
+- Init-system-agnostic scheduling examples in `contrib/`: systemd units,
+  an OpenRC service, a portable POSIX `sh` cron wrapper (log rotation, load
+  splaying, weekly `verify`, exit-code mapping), and a macOS launchd agent.
+
 **Project**
 - Zero runtime dependencies: standard library plus the `git` binary.
 - 201 tests covering real git repositories over `file://` and a stdlib fake

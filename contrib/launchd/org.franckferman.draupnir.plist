@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS launchd agent: mirrors nightly at 03:30.
+
+  Install:
+      cp contrib/launchd/org.franckferman.draupnir.plist ~/Library/LaunchAgents/
+      $EDITOR ~/Library/LaunchAgents/org.franckferman.draupnir.plist
+      launchctl load ~/Library/LaunchAgents/org.franckferman.draupnir.plist
+
+  Run once now:
+      launchctl start org.franckferman.draupnir
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>org.franckferman.draupnir</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/draupnir</string>
+        <string>sync</string>
+        <string>https://git.example.org</string>
+        <string>--output</string>
+        <string>/Users/CHANGEME/mirror</string>
+        <string>--jobs</string>
+        <string>4</string>
+        <string>--quiet</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <!-- Catch up after the Mac was asleep at the scheduled time. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/draupnir.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/draupnir.log</string>
+
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <!-- Token for private repositories, if needed. -->
+    <!--
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>DRAUPNIR_TOKEN</key>
+        <string>...</string>
+    </dict>
+    -->
+</dict>
+</plist>

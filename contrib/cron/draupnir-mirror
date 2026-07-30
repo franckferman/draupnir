@@ -1,0 +1,106 @@
+#!/bin/sh
+# Portable cron wrapper for draupnir -- works with any cron on any init system
+# (OpenRC, runit, s6, SysV, BSD, macOS). This is the scheduling half that
+# OpenRC does not provide; systemd users want ../systemd/ instead.
+#
+# Install:
+#     cp contrib/cron/draupnir-mirror /etc/cron.daily/draupnir
+#     chmod +x /etc/cron.daily/draupnir
+#     $EDITOR /etc/cron.daily/draupnir      # or use /etc/default/draupnir
+#
+# Or an explicit schedule, running as an unprivileged user:
+#     # /etc/cron.d/draupnir
+#     30 3 * * *  mirror  /usr/local/sbin/draupnir-mirror
+#
+# Exit codes are mapped so cron only mails you when something is actually
+# wrong: a partial run warns, a clean run is silent.
+
+set -eu
+
+# Settings may be overridden here, in /etc/default/draupnir, or in the
+# environment. Values already exported win.
+[ -r /etc/default/draupnir ] && . /etc/default/draupnir
+
+: "${DRAUPNIR_BIN:=draupnir}"
+: "${FORGE_URL:=https://git.example.org}"
+: "${OUTPUT:=/srv/mirror}"
+: "${LOG_DIR:=/var/log/draupnir}"
+: "${ARGS:=--mode mirror --jobs 4 --quiet}"
+: "${KEEP_LOGS:=14}"
+# Spread load when many hosts mirror the same forge: sleep up to N seconds.
+: "${SPLAY:=0}"
+# Run git fsck over the mirror on this weekday (0=Sunday, empty to disable).
+: "${VERIFY_ON:=0}"
+
+log_file="${LOG_DIR}/mirror-$(date +%Y%m%d-%H%M%S).log"
+
+command -v "${DRAUPNIR_BIN}" >/dev/null 2>&1 || {
+	echo "draupnir-mirror: ${DRAUPNIR_BIN} not found in PATH" >&2
+	exit 127
+}
+
+mkdir -p "${LOG_DIR}" "${OUTPUT}"
+
+if [ "${SPLAY}" -gt 0 ] 2>/dev/null; then
+	# No $RANDOM in POSIX sh; the PID is random enough for load spreading.
+	sleep "$(( $$ % SPLAY ))"
+fi
+
+# draupnir holds its own lock on the output directory, so a run overlapping a
+# previous one exits 2 rather than corrupting anything. flock is only used
+# when available, to turn that collision into a silent no-op.
+if command -v flock >/dev/null 2>&1; then
+	exec 9>"${LOG_DIR}/.cron.lock"
+	flock -n 9 || {
+		echo "draupnir-mirror: previous run still going, skipping" >&2
+		exit 0
+	}
+fi
+
+status=0
+# shellcheck disable=SC2086  # ARGS is intentionally word-split
+"${DRAUPNIR_BIN}" sync "${FORGE_URL}" \
+	--output "${OUTPUT}" \
+	--json "${LOG_DIR}/last-run.json" \
+	${ARGS} >"${log_file}" 2>&1 || status=$?
+
+case "${status}" in
+	0)
+		;;
+	1)
+		echo "draupnir: some repositories failed -- ${log_file}" >&2
+		;;
+	130)
+		echo "draupnir: interrupted -- ${log_file}" >&2
+		status=0
+		;;
+	2)
+		# Another run holds the lock: not an error worth mailing about.
+		if grep -qi 'is held by pid' "${log_file}" 2>/dev/null; then
+			status=0
+		else
+			echo "draupnir: could not start -- ${log_file}" >&2
+			cat "${log_file}" >&2
+		fi
+		;;
+	*)
+		echo "draupnir: exited ${status} -- ${log_file}" >&2
+		cat "${log_file}" >&2
+		;;
+esac
+
+# Weekly integrity check.
+if [ -n "${VERIFY_ON}" ] && [ "$(date +%w)" = "${VERIFY_ON}" ]; then
+	if ! "${DRAUPNIR_BIN}" verify --output "${OUTPUT}" \
+		--json "${LOG_DIR}/verify.json" --quiet >>"${log_file}" 2>&1; then
+		echo "draupnir: MIRROR DAMAGED -- see ${LOG_DIR}/verify.json" >&2
+		status=3
+	fi
+fi
+
+# Prune old logs without needing logrotate.
+if [ "${KEEP_LOGS}" -gt 0 ] 2>/dev/null; then
+	find "${LOG_DIR}" -name 'mirror-*.log' -type f -mtime "+${KEEP_LOGS}" -delete 2>/dev/null || true
+fi
+
+exit "${status}"
