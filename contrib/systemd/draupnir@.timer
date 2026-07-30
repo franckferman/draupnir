@@ -1,0 +1,14 @@
+[Unit]
+Description=Nightly draupnir mirror of %i
+Documentation=https://github.com/franckferman/draupnir
+
+[Timer]
+OnCalendar=daily
+# Spread load so every mirror on the host does not hit its forge at 00:00.
+RandomizedDelaySec=1h
+# Catch up after downtime instead of silently skipping a night.
+Persistent=true
+Unit=draupnir@%i.service
+
+[Install]
+WantedBy=timers.target

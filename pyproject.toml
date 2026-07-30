@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "draupnir"
+version = "1.0.0"
+description = "Mirror every repository of a Gitea/Forgejo forge, reliably and incrementally"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "franckferman", email = "contact@franckferman.fr" }]
+keywords = [
+  "gitea", "forgejo", "git", "mirror", "backup", "archive",
+  "clone", "forge", "disaster-recovery", "self-hosted",
+]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: System Administrators",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Version Control :: Git",
+  "Topic :: System :: Archiving :: Backup",
+  "Topic :: Utilities",
+]
+# No runtime dependencies, on purpose. Only the stdlib and the git binary.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/franckferman/draupnir"
+Repository = "https://github.com/franckferman/draupnir"
+Issues = "https://github.com/franckferman/draupnir/issues"
+Changelog = "https://github.com/franckferman/draupnir/blob/stable/CHANGELOG.md"
+
+[project.scripts]
+draupnir = "draupnir.cli:entrypoint"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11"]
+
+[tool.setuptools.packages.find]
+include = ["draupnir*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["error::DeprecationWarning:draupnir.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+  "B008",   # function call in default arg -- not used here, silences false hits
+  "SIM105", # contextlib.suppress is slower in hot loops
+  "RUF012", # mutable class attrs are deliberate in the fake test server
+  "N818",   # Interrupted/RateLimited/GitMissing read better without an Error suffix
+  "RUF022", # __all__ is grouped by layer on purpose, not alphabetically
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N802", "N806", "B011", "E501"]
+
+[tool.mypy]
+# mypy no longer accepts a 3.9 target; runtime support stays 3.9+ (verified in CI).
+python_version = "3.10"
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = true
+exclude = "^(build|dist)/"

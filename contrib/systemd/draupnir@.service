@@ -1,0 +1,50 @@
+# Templated unit: one instance per forge.
+#   systemctl enable --now draupnir@git.example.org.timer
+#
+# Reads its arguments from /etc/draupnir/<instance>.conf, e.g.
+#   FORGE_URL=https://git.example.org
+#   OUTPUT=/srv/mirror/git.example.org
+#   DRAUPNIR_ARGS=--mode mirror --jobs 8 --include-wiki
+#   DRAUPNIR_TOKEN=...            (chmod 600, root-owned)
+
+[Unit]
+Description=Mirror %i with draupnir
+Documentation=https://github.com/franckferman/draupnir
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=mirror
+Group=mirror
+EnvironmentFile=/etc/draupnir/%i.conf
+ExecStart=/usr/local/bin/draupnir sync ${FORGE_URL} \
+    --output ${OUTPUT} \
+    --json /var/log/draupnir/%i.json \
+    $DRAUPNIR_ARGS
+
+# A large forge over a slow link still has to finish.
+TimeoutStartSec=6h
+Nice=10
+IOSchedulingClass=idle
+
+# Hardening -- draupnir only needs to read the network and write its mirror.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+ReadWritePaths=/srv/mirror /var/log/draupnir
+
+[Install]
+WantedBy=multi-user.target
