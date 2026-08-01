@@ -62,6 +62,12 @@ First public release.
   an OpenRC service, a portable POSIX `sh` cron wrapper (log rotation, load
   splaying, weekly `verify`, exit-code mapping), and a macOS launchd agent.
 
+**Releases**
+- Tag-driven pipeline: pushing `v*` builds a wheel, an sdist and a
+  single-file `.pyz` (zipapp), smoke-tests each one, publishes checksums,
+  and creates the GitHub release from the changelog. The tag is refused if
+  it disagrees with the version in the source.
+
 **Project**
 - Zero runtime dependencies: standard library plus the `git` binary.
 - 201 tests covering real git repositories over `file://` and a stdlib fake

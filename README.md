@@ -87,7 +87,25 @@ restore path on the day you actually need it.
 
 ## Install
 
-Requires **Python 3.9+** and **git**.
+Requires **Python 3.9+** and **git**. Nothing else, ever.
+
+**Single file, no install** — grab the `.pyz` from the
+[latest release](https://github.com/franckferman/draupnir/releases/latest):
+
+```bash
+curl -LO https://github.com/franckferman/draupnir/releases/latest/download/draupnir.pyz
+chmod +x draupnir.pyz
+./draupnir.pyz sync https://git.example.org -o ~/mirror
+```
+
+That one file *is* draupnir — a zipapp holding the whole package. Drop it on a
+server, run it, delete it. Every release also ships a `SHA256SUMS` file:
+
+```bash
+sha256sum -c SHA256SUMS
+```
+
+**With pip:**
 
 ```bash
 pip install git+https://github.com/franckferman/draupnir.git

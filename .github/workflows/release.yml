@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build a release for, e.g. v1.0.0"
+        required: true
+
+permissions:
+  contents: write   # required to create the release
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to release a version that disagrees with the tag
+        run: |
+          # A tag pointing at a different version ships artefacts whose
+          # filenames lie about their contents. Fail loudly instead.
+          PKG=$(python -c "import re,pathlib; \
+            print(re.search(r'^__version__ = \"([^\"]+)\"', \
+            pathlib.Path('draupnir/__init__.py').read_text(), re.M).group(1))")
+          PROJ=$(python -c "import re,pathlib; \
+            print(re.search(r'^version = \"([^\"]+)\"', \
+            pathlib.Path('pyproject.toml').read_text(), re.M).group(1))")
+          echo "tag=${{ steps.tag.outputs.version }} __init__=${PKG} pyproject=${PROJ}"
+          test "${PKG}" = "${{ steps.tag.outputs.version }}" \
+            || { echo "::error::__init__.py says ${PKG}, tag says ${{ steps.tag.outputs.version }}"; exit 1; }
+          test "${PROJ}" = "${{ steps.tag.outputs.version }}" \
+            || { echo "::error::pyproject.toml says ${PROJ}, tag says ${{ steps.tag.outputs.version }}"; exit 1; }
+
+      - name: Test before shipping
+        run: |
+          pip install -e ".[dev]"
+          pytest tests -q
+
+      - name: Build wheel and sdist
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+
+      - name: Build the single-file executable
+        run: |
+          # zipapp: draupnir imports nothing but the stdlib, so one .pyz runs
+          # anywhere a Python 3.9+ interpreter exists -- no install, no venv.
+          mkdir -p build/app
+          cp -r draupnir build/app/
+          find build/app -name '__pycache__' -type d -exec rm -rf {} + || true
+          python -m zipapp build/app \
+            -m "draupnir.cli:main" \
+            -p "/usr/bin/env python3" \
+            -o "dist/draupnir-${{ steps.tag.outputs.version }}.pyz" \
+            -c
+          chmod +x "dist/draupnir-${{ steps.tag.outputs.version }}.pyz"
+          # Second, unversioned copy so /releases/latest/download/draupnir.pyz
+          # is a stable URL that scripts and docs can hardcode.
+          cp "dist/draupnir-${{ steps.tag.outputs.version }}.pyz" dist/draupnir.pyz
+
+      - name: Smoke test every artefact
+        run: |
+          set -e
+          PYZ="dist/draupnir-${{ steps.tag.outputs.version }}.pyz"
+          # The .pyz must work with nothing installed.
+          python -m venv /tmp/bare
+          /tmp/bare/bin/python "${PYZ}" --version
+          ./"${PYZ}" --help > /dev/null
+          echo "pyz OK"
+          python -m venv /tmp/wheel
+          /tmp/wheel/bin/pip install --quiet dist/*.whl
+          /tmp/wheel/bin/draupnir --version
+          echo "wheel OK"
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Extract release notes from the changelog
+        run: |
+          python - <<'PY' > NOTES.md
+          import pathlib, re
+          version = "${{ steps.tag.outputs.version }}"
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # Grab the section for this version, up to the next "## [" heading.
+          match = re.search(
+              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)",
+              text, re.M | re.S)
+          body = match.group(1).strip() if match else "See CHANGELOG.md."
+          print(body)
+          print()
+          print("---")
+          print()
+          print("## Install")
+          print()
+          print("**Single file, no install** — needs only Python 3.9+ and git:")
+          print()
+          print("```bash")
+          print(f"curl -LO https://github.com/${{ github.repository }}/releases/download/"
+                f"v{version}/draupnir-{version}.pyz")
+          print(f"chmod +x draupnir-{version}.pyz")
+          print(f"./draupnir-{version}.pyz --help")
+          print("```")
+          print()
+          print("**With pip:**")
+          print()
+          print("```bash")
+          print(f"pip install https://github.com/${{ github.repository }}/releases/download/"
+                f"v{version}/draupnir-{version}-py3-none-any.whl")
+          print("```")
+          print()
+          print("Verify what you downloaded with `sha256sum -c SHA256SUMS`.")
+          PY
+          cat NOTES.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --title "draupnir ${{ steps.tag.outputs.version }}" \
+            --notes-file NOTES.md \
+            --verify-tag \
+            dist/*
